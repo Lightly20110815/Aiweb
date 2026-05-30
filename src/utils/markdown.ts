@@ -1,27 +1,31 @@
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 
-const md = new MarkdownIt({
+const markdown = new MarkdownIt({
   html: false,
   breaks: true,
   linkify: true,
-  highlight(str: string, lang: string): string {
-    if (lang && hljs.getLanguage(lang)) {
+  highlight(code: string, language: string): string {
+    const safeCode = markdown.utils.escapeHtml(code)
+
+    if (language && hljs.getLanguage(language)) {
       try {
-        return `<pre><code class="hljs language-${lang}">${hljs.highlight(str, { language: lang }).value}</code></pre>`
+        const highlighted = hljs.highlight(code, { language }).value
+        return `<pre class="code-block"><code class="hljs language-${language}">${highlighted}</code></pre>`
       } catch {
-        // fall through to auto-detection
+        return `<pre class="code-block"><code>${safeCode}</code></pre>`
       }
     }
-    // Auto-detect language
+
     try {
-      return `<pre><code class="hljs">${hljs.highlightAuto(str).value}</code></pre>`
+      const highlighted = hljs.highlightAuto(code).value
+      return `<pre class="code-block"><code class="hljs">${highlighted}</code></pre>`
     } catch {
-      return `<pre><code>${md.utils.escapeHtml(str)}</code></pre>`
+      return `<pre class="code-block"><code>${safeCode}</code></pre>`
     }
   },
 })
 
-export function renderMarkdown(text: string): string {
-  return md.render(text)
+export function renderMarkdown(content: string): string {
+  return markdown.render(content)
 }

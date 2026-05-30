@@ -1,57 +1,57 @@
-/** Role of a chat message */
-export type MessageRole = 'user' | 'assistant' | 'system'
+import type { Provider } from './provider'
+import type { SupportedLocale } from './settings'
 
-/** Status of a message */
-export type MessageStatus = 'normal' | 'streaming' | 'error'
+export type ChatRole = 'system' | 'user' | 'assistant'
+export type ChatMessageStatus = 'normal' | 'streaming' | 'error'
 
-/** A single chat message */
-export interface Message {
+export interface ChatMessage {
   id: string
-  role: MessageRole
+  role: ChatRole
   content: string
+  status: ChatMessageStatus
   createdAt: number
-  status: MessageStatus
+  errorMessage?: string
 }
 
-/** A chat session */
-export interface Session {
+export interface ChatSession {
   id: string
   title: string
-  createdAt: number
-  updatedAt: number
   providerId: string
   model: string
-  messages: Message[]
+  messages: ChatMessage[]
+  createdAt: number
+  updatedAt: number
 }
 
-/** Advanced parameters for API requests — all optional, only sent when explicitly set */
 export interface AdvancedParams {
   temperature?: number
-  topP?: number
-  maxTokens?: number
-  presencePenalty?: number
-  frequencyPenalty?: number
+  top_p?: number
+  max_tokens?: number
+  presence_penalty?: number
+  frequency_penalty?: number
 }
 
-/** Unified request payload passed to the API layer */
+export interface ChatRequestMessage {
+  role: ChatRole
+  content: string
+}
+
 export interface ChatRequest {
-  provider: import('./provider').Provider
+  provider: Provider
   model: string
-  messages: Array<{ role: MessageRole; content: string }>
+  messages: ChatRequestMessage[]
   stream: boolean
-  advanced?: AdvancedParams
+  advancedParams?: AdvancedParams
 }
 
-/** Streaming chunk callback */
-export type StreamCallback = (chunk: string) => void
-
-/** Error callback */
-export type ErrorCallback = (error: ChatError) => void
-
-/** Structured chat error */
 export interface ChatError {
-  type: 'auth' | 'rate_limit' | 'network' | 'server' | 'parse' | 'unknown'
+  type: 'auth' | 'network' | 'rate_limit' | 'server' | 'validation' | 'unknown'
   message: string
   statusCode?: number
-  raw?: unknown
+}
+
+export interface SendChatOptions {
+  signal: AbortSignal
+  locale: SupportedLocale
+  onChunk: (chunk: string) => void
 }

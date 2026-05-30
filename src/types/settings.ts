@@ -1,17 +1,23 @@
 import type { AdvancedParams } from './chat'
 
-/** Global app settings persisted to localStorage */
-export interface AppSettings {
-  /** Whether streaming is enabled by default */
+export type ThemeMode = 'dark' | 'light' | 'system'
+export type SupportedLocale = 'en' | 'zh-CN'
+export type LocaleMode = 'system' | SupportedLocale
+
+export interface Settings {
+  theme: ThemeMode
+  locale: LocaleMode
+  defaultProviderId: string | null
   streamEnabled: boolean
-  /** Whether to save API keys to localStorage */
-  saveApiKeys: boolean
-  /** Advanced parameters — empty/undefined means "use model defaults" */
-  advanced: AdvancedParams
-  /** Whether advanced params are enabled */
-  advancedEnabled: boolean
-  /** UI theme */
-  theme: 'light' | 'dark' | 'system'
-  /** Sidebar collapsed on desktop */
-  sidebarCollapsed: boolean
+  saveApiKeyLocally: boolean
+  advancedParams: AdvancedParams
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  theme: 'dark',
+  locale: 'system',
+  defaultProviderId: null,
+  streamEnabled: true,
+  saveApiKeyLocally: true,
+  advancedParams: {},
 }

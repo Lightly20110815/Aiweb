@@ -1,44 +1,128 @@
 <script setup lang="ts">
-defineProps<{ show: boolean; title?: string }>()
-const emit = defineEmits<{ close: [] }>()
+import { Teleport, watch } from 'vue'
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    title?: string
+    placement?: 'center' | 'right'
+    width?: string
+  }>(),
+  {
+    title: '',
+    placement: 'center',
+    width: '',
+  },
+)
+
+const emit = defineEmits<{
+  close: []
+}>()
+
+watch(
+  () => props.open,
+  (open) => {
+    document.body.style.overflow = open ? 'hidden' : ''
+  },
+)
 </script>
 
 <template>
   <Teleport to="body">
-    <div v-if="show" class="modal-overlay" @click.self="emit('close')">
-      <div class="modal-content">
-        <div class="modal-header" v-if="title">
-          <h2>{{ title }}</h2>
-          <button class="modal-close" @click="emit('close')">&times;</button>
-        </div>
-        <div class="modal-body">
-          <slot />
+    <Transition name="modal-fade">
+      <div v-if="open" class="modal-root">
+        <div class="modal-overlay" @click="emit('close')" />
+        <div class="modal-frame" :class="`modal-frame--${placement}`">
+          <section class="modal-panel surface-card" :style="width ? { width } : undefined">
+            <header v-if="title || $slots.header" class="modal-header">
+              <slot name="header">
+                <h2 class="modal-title">{{ title }}</h2>
+              </slot>
+            </header>
+            <div class="modal-content">
+              <slot />
+            </div>
+          </section>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
 <style scoped>
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
 .modal-overlay {
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(0,0,0,.5); display: flex;
-  align-items: center; justify-content: center;
-  padding: 20px;
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 20, 0.45);
 }
-.modal-content {
-  background: var(--bg-primary);
-  border-radius: 12px; max-width: 640px; width: 100%;
-  max-height: 85vh; overflow-y: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,.3);
+
+.modal-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  padding: 1.25rem;
 }
+
+.modal-frame--center {
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-frame--right {
+  justify-content: flex-end;
+}
+
+.modal-panel {
+  position: relative;
+  width: min(100%, 760px);
+  overflow: hidden;
+}
+
+.modal-frame--right .modal-panel {
+  width: min(100%, var(--settings-width));
+  height: 100%;
+  border-radius: 28px 0 0 28px;
+}
+
 .modal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 20px 24px 0; font-size: 18px; font-weight: 600;
+  padding: 1.25rem 1.5rem 0;
 }
-.modal-close {
-  background: none; border: none; font-size: 24px;
-  cursor: pointer; color: var(--text-secondary);
+
+.modal-title {
+  margin: 0;
+  font-size: 1.1rem;
 }
-.modal-body { padding: 24px; }
+
+.modal-content {
+  min-height: 0;
+}
+
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 180ms ease;
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
+}
+
+@media (max-width: 900px) {
+  .modal-frame {
+    padding: 0;
+  }
+
+  .modal-panel,
+  .modal-frame--right .modal-panel {
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0;
+  }
+}
 </style>

@@ -1,32 +1,20 @@
-import type { ChatRequest, StreamCallback, ErrorCallback } from '@/types/chat'
-import { sendOpenAICompatible } from './providers/openai-compatible'
-import { sendAnthropic } from './providers/anthropic'
-import { sendGemini } from './providers/gemini'
+import type { ChatRequest, SendChatOptions } from '@/types/chat'
+import { sendAnthropicChat } from './providers/anthropic'
+import { sendGeminiChat } from './providers/gemini'
+import { sendOpenAICompatibleChat } from './providers/openaiCompatible'
 
-export interface SendOptions {
-  signal: AbortSignal
-  onChunk: StreamCallback
-  onError: ErrorCallback
-}
-
-/** Unified message sending — routes to the correct adapter based on provider format */
-export async function sendMessage(
-  req: ChatRequest,
-  options: SendOptions,
+export async function sendChatRequest(
+  request: ChatRequest,
+  options: SendChatOptions,
 ): Promise<string> {
-  const { provider } = req
-
-  // Fall back to openai-compatible for custom format
-  const format = provider.requestFormat || 'openai-compatible'
-
-  switch (format) {
+  switch (request.provider.type) {
     case 'anthropic':
-      return sendAnthropic(req, options.signal, options.onChunk, options.onError)
+      return sendAnthropicChat(request, options)
     case 'gemini':
-      return sendGemini(req, options.signal, options.onChunk, options.onError)
+      return sendGeminiChat(request, options)
     case 'openai-compatible':
     case 'custom':
     default:
-      return sendOpenAICompatible(req, options.signal, options.onChunk, options.onError)
+      return sendOpenAICompatibleChat(request, options)
   }
 }

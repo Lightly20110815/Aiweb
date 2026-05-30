@@ -1,91 +1,105 @@
-import type { ChatRequest, ChatError, StreamCallback, ErrorCallback } from '@/types/chat'
+import { translate } from '@/i18n/messages'
+import type { ChatRequest, SendChatOptions } from '@/types/chat'
+import { createChatError, readSseStream } from './openaiCompatible'
 
-export async function sendGemini(
-  req: ChatRequest,
-  signal: AbortSignal,
-  onChunk: StreamCallback,
-  onError: ErrorCallback,
+export async function sendGeminiChat(
+  request: ChatRequest,
+  options: SendChatOptions,
 ): Promise<string> {
-  const { provider, model, messages, stream, advanced } = req
-
-  // Build Gemini contents from messages
-  const contents = messages
-    .filter((m) => m.role !== 'system')
-    .map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
+  const systemMessage = request.messages.find((message) => message.role === 'system')
+  const contents = request.messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => ({
+      role: message.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: message.content }],
     }))
 
-  const systemMsg = messages.find((m) => m.role === 'system')
+  const body: Record<string, unknown> = { contents }
 
-  const body: Record<string, unknown> = {
-    contents,
+  if (systemMessage) {
+    body.systemInstruction = {
+      parts: [{ text: systemMessage.content }],
+    }
   }
 
-  if (systemMsg) {
-    body.systemInstruction = { parts: [{ text: systemMsg.content }] }
+  const generationConfig: Record<string, number> = {}
+
+  if (request.advancedParams?.temperature !== undefined) {
+    generationConfig.temperature = request.advancedParams.temperature
   }
 
-  const generationConfig: Record<string, unknown> = {}
-  if (advanced?.temperature !== undefined) generationConfig.temperature = advanced.temperature
-  if (advanced?.topP !== undefined) generationConfig.topP = advanced.topP
-  if (advanced?.maxTokens !== undefined) generationConfig.maxOutputTokens = advanced.maxTokens
+  if (request.advancedParams?.top_p !== undefined) {
+    generationConfig.topP = request.advancedParams.top_p
+  }
+
+  if (request.advancedParams?.max_tokens !== undefined) {
+    generationConfig.maxOutputTokens = request.advancedParams.max_tokens
+  }
+
   if (Object.keys(generationConfig).length > 0) {
     body.generationConfig = generationConfig
   }
 
-  const url = `${provider.baseUrl.replace(/\/+$/, '')}/models/${model}:${stream ? 'streamGenerateContent' : 'generateContent'}?alt=${stream ? 'sse' : 'json'}&key=${encodeURIComponent(provider.apiKey)}`
+  const mode = request.stream ? 'streamGenerateContent' : 'generateContent'
+  const format = request.stream ? 'sse' : 'json'
+  const url =
+    `${request.provider.baseUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(request.model)}:${mode}` +
+    `?alt=${format}&key=${encodeURIComponent(request.provider.apiKey)}`
 
-  let response: Response
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal,
-    })
-  } catch (e: unknown) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw e
-    const err: ChatError = { type: 'network', message: '网络请求失败，请检查网络连接和 API 地址。' }
-    onError(err)
-    throw new Error(err.message)
-  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  }).catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error
+    }
+
+    throw createChatError('network', translate(options.locale, 'errors.networkRequestFailed'))
+  })
 
   if (!response.ok) {
-    const errBody = await response.text().catch(() => '')
-    const err: ChatError = { type: 'unknown', message: `Gemini 请求失败 (${response.status}): ${errBody.slice(0, 200)}`, statusCode: response.status }
-    onError(err)
-    throw new Error(err.message)
+    const bodyText = await response.text().catch(() => '')
+
+    if (response.status === 401 || response.status === 403) {
+      throw createChatError('auth', translate(options.locale, 'errors.authFailed'), response.status)
+    }
+
+    throw createChatError(
+      response.status >= 500 ? 'server' : 'unknown',
+      bodyText
+        ? translate(options.locale, 'errors.requestFailed', { details: bodyText.slice(0, 240) })
+        : translate(options.locale, 'errors.requestFailedStatus', { status: response.status }),
+      response.status,
+    )
   }
 
-  if (stream) {
-    const text = await response.text()
-    return parseGeminiStream(text, onChunk)
+  if (request.stream && response.body) {
+    return readSseStream(response.body, (payload) => {
+      const chunk = readGeminiText(payload)
+
+      if (chunk) {
+        options.onChunk(chunk)
+        return chunk
+      }
+
+      return null
+    }, options.locale)
   }
 
-  const data = await response.json()
-  const content = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
-  onChunk(content)
+  const data = (await response.json()) as Record<string, unknown>
+  const content = readGeminiText(data) ?? ''
+  options.onChunk(content)
   return content
 }
 
-function parseGeminiStream(raw: string, onChunk: StreamCallback): string {
-  let fullContent = ''
-  const lines = raw.split('\n')
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed || !trimmed.startsWith('data: ')) continue
-    const dataStr = trimmed.slice(6)
-    try {
-      const parsed = JSON.parse(dataStr)
-      const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text
-      if (text) {
-        fullContent += text
-        onChunk(text)
-      }
-    } catch {
-      // Skip
-    }
-  }
-  return fullContent
+function readGeminiText(payload: Record<string, unknown>): string | null {
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : []
+  const firstCandidate = candidates[0] as { content?: { parts?: Array<{ text?: string }> } } | undefined
+  const text = firstCandidate?.content?.parts?.[0]?.text
+
+  return typeof text === 'string' && text.length > 0 ? text : null
 }

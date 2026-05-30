@@ -1,104 +1,154 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { useI18n } from '@/composables/useI18n'
+import Textarea from '@/components/common/Textarea.vue'
+import Button from '@/components/common/Button.vue'
 
-const props = defineProps<{ disabled: boolean; generating: boolean }>()
-const emit = defineEmits<{ send: [content: string]; stop: [] }>()
+const props = defineProps<{
+  modelValue: string
+  disabled?: boolean
+  isStreaming: boolean
+  errorMessage?: string | null
+  lockedReason?: string | null
+  lockedActionLabel?: string
+}>()
 
-const input = ref('')
-const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const emit = defineEmits<{
+  'update:modelValue': [value: string]
+  submit: []
+  stop: []
+  'locked-action': []
+}>()
 
-function handleKeydown(e: KeyboardEvent) {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-}
+const { t } = useI18n()
 
-function send() {
-  const text = input.value.trim()
-  if (!text || props.disabled) return
-  emit('send', text)
-  input.value = ''
-  nextTick(autoResize)
-}
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
 
-function autoResize() {
-  const el = textareaRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+    if (props.isStreaming) {
+      emit('stop')
+      return
+    }
+
+    if (!props.lockedReason && !props.disabled) {
+      emit('submit')
+    }
+  }
 }
 </script>
 
 <template>
-  <div class="input-area">
-    <div class="input-container">
-      <div class="input-shell">
-        <textarea
-          ref="textareaRef"
-          v-model="input"
-          class="input-field"
-          placeholder="输入消息，Enter 发送，Shift+Enter 换行..."
-          :disabled="disabled"
-          @keydown="handleKeydown"
-          @input="autoResize"
-          rows="1"
-        />
-        <div class="input-actions">
-          <button v-if="generating" class="send-btn stop-btn" @click="emit('stop')" title="停止生成">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-          </button>
-          <button v-else class="send-btn" :class="{ ready: input.trim() && !disabled }" :disabled="!input.trim() || disabled" @click="send" title="发送">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
-              <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-            </svg>
-          </button>
-        </div>
+  <footer class="chat-input-wrap">
+    <div v-if="lockedReason" class="input-lock surface-card">
+      <div>
+        <p class="input-lock__title">{{ t('chat.inputWaitingTitle') }}</p>
+        <p class="input-lock__copy">{{ lockedReason }}</p>
       </div>
-      <p class="input-hint">API Key 仅保存在本地。AI 可能会出错，请自行判断。</p>
+      <Button variant="primary" @click="emit('locked-action')">
+        {{ lockedActionLabel || t('chat.openSettings') }}
+      </Button>
     </div>
-  </div>
+
+    <div v-else class="chat-input surface-card">
+      <Textarea
+        :model-value="modelValue"
+        :disabled="disabled"
+        :placeholder="t('chat.inputPlaceholder')"
+        @update:model-value="emit('update:modelValue', $event)"
+        @keydown="onKeydown"
+      />
+
+      <div class="chat-input__footer">
+        <div class="chat-input__meta">
+          <p v-if="errorMessage" class="chat-input__error">{{ errorMessage }}</p>
+          <p v-else class="chat-input__note">
+            {{ t('chat.localNotice') }}
+          </p>
+        </div>
+
+        <Button
+          :variant="isStreaming ? 'danger' : 'primary'"
+          :disabled="disabled || (!isStreaming && !modelValue.trim())"
+          @click="isStreaming ? emit('stop') : emit('submit')"
+        >
+          {{ isStreaming ? t('chat.stop') : t('chat.send') }}
+        </Button>
+      </div>
+    </div>
+  </footer>
 </template>
 
 <style scoped>
-.input-area { padding: var(--space-3) var(--space-5) var(--space-5); flex-shrink: 0; }
-.input-container { max-width: var(--chat-max-width); margin: 0 auto; width: 100%; }
-
-.input-shell {
-  display: flex; align-items: flex-end; gap: var(--space-3);
-  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
-  background: rgba(28, 29, 50, 0.92); border: 1px solid var(--border); border-radius: var(--radius-xl);
-  transition: border-color var(--transition-base), box-shadow var(--transition-base);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-}
-.input-shell:focus-within {
-  border-color: var(--border-strong);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18), 0 0 0 3px rgba(155, 140, 255, 0.10);
+.chat-input-wrap {
+  width: 100%;
+  padding: 0 1.2rem 1.2rem;
 }
 
-.input-field {
-  flex: 1; border: none; background: transparent; resize: none;
-  font-size: var(--text-base); line-height: 1.55; font-family: var(--font-sans);
-  color: var(--text); outline: none; padding: var(--space-1) 0;
-  max-height: 200px; min-height: 24px;
+.chat-input,
+.input-lock {
+  width: min(100%, var(--chat-max-width));
+  margin: 0 auto;
 }
-.input-field::placeholder { color: var(--text-soft); }
-.input-field:disabled { opacity: 0.4; }
 
-.input-actions { display: flex; align-items: center; flex-shrink: 0; }
-
-.send-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px; border: none; border-radius: var(--radius-md);
-  background: var(--accent-soft); color: var(--text-muted); cursor: pointer;
-  transition: all var(--transition-fast);
+.chat-input {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0.95rem;
 }
-.send-btn.ready {
-  background: var(--accent); color: var(--text-on-accent);
-  box-shadow: 0 2px 10px rgba(155, 140, 255, 0.22);
+
+.chat-input__footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
 }
-.send-btn.ready:hover { background: var(--accent-hover); transform: scale(1.05); }
-.send-btn:disabled { cursor: not-allowed; }
 
-.stop-btn { background: var(--danger); color: #fff; box-shadow: 0 2px 10px rgba(255, 139, 154, 0.22); }
-.stop-btn:hover { background: #ff6b7a; transform: scale(1.05); }
+.chat-input__meta {
+  min-width: 0;
+}
 
-.input-hint { text-align: center; font-size: var(--text-xs); color: var(--text-soft); margin-top: var(--space-2); }
+.chat-input__note,
+.chat-input__error {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
+.chat-input__note {
+  color: var(--text-soft);
+}
+
+.chat-input__error {
+  color: var(--danger-text);
+}
+
+.input-lock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.input-lock__title,
+.input-lock__copy {
+  margin: 0;
+}
+
+.input-lock__copy {
+  margin-top: 0.22rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 700px) {
+  .chat-input-wrap {
+    padding: 0 0.85rem 0.85rem;
+  }
+
+  .chat-input__footer,
+  .input-lock {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 </style>
