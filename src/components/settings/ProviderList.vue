@@ -1,69 +1,278 @@
 <script setup lang="ts">
+import { useI18n } from '@/composables/useI18n'
+import Button from '@/components/common/Button.vue'
 import type { Provider } from '@/types/provider'
 
-defineProps<{ providers: Provider[] }>()
-const emit = defineEmits<{ edit: [id: string]; delete: [id: string]; setDefault: [id: string] }>()
+defineProps<{
+  providers: Provider[]
+  defaultProviderId: string | null
+  selectedProviderId: string | null
+}>()
+
+const emit = defineEmits<{
+  create: []
+  select: [providerId: string]
+  edit: [providerId: string]
+  setDefault: [providerId: string]
+  remove: [providerId: string]
+}>()
+
+const { t, providerTypeLabel } = useI18n()
 </script>
 
 <template>
-  <div class="provider-list">
-    <div v-if="providers.length === 0" class="empty">
-      <p class="empty-title">还没有 Provider</p>
-      <p class="empty-desc">点击上方「添加」按钮开始配置</p>
+  <section class="provider-list">
+    <div v-if="providers.length" class="provider-list__scroll">
+      <article
+        v-for="provider in providers"
+        :key="provider.id"
+        class="provider-card"
+        :class="{
+          'is-selected': provider.id === selectedProviderId,
+          'is-default': provider.id === defaultProviderId,
+        }"
+        @click="emit('select', provider.id)"
+      >
+        <header class="provider-card__header">
+          <div class="provider-card__title-wrap">
+            <div class="provider-card__title-row">
+              <strong>{{ provider.name }}</strong>
+              <span v-if="provider.id === defaultProviderId" class="provider-badge provider-badge--accent">
+                {{ t('provider.list.default') }}
+              </span>
+            </div>
+            <p class="provider-card__type">{{ providerTypeLabel(provider.type) }}</p>
+          </div>
+          <span class="provider-badge" :class="provider.enabled ? 'provider-badge--success' : 'provider-badge--muted'">
+            {{ provider.enabled ? t('common.enabled') : t('common.disabled') }}
+          </span>
+        </header>
+
+        <dl class="provider-card__details">
+          <div>
+            <dt>{{ t('provider.list.baseUrl') }}</dt>
+            <dd :title="provider.baseUrl">{{ provider.baseUrl || '--' }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('provider.list.defaultModel') }}</dt>
+            <dd>{{ provider.defaultModel || provider.models[0] || '--' }}</dd>
+          </div>
+        </dl>
+
+        <footer class="provider-card__footer">
+          <span class="provider-count">{{ t('provider.list.modelsCount', { count: provider.models.length }) }}</span>
+          <div class="provider-card__actions">
+            <button type="button" class="provider-action" @click.stop="emit('edit', provider.id)">
+              {{ t('common.edit') }}
+            </button>
+            <button
+              type="button"
+              class="provider-action"
+              :disabled="provider.id === defaultProviderId"
+              @click.stop="emit('setDefault', provider.id)"
+            >
+              {{ t('provider.list.setDefault') }}
+            </button>
+            <button type="button" class="provider-action provider-action--danger" @click.stop="emit('remove', provider.id)">
+              {{ t('common.delete') }}
+            </button>
+          </div>
+        </footer>
+      </article>
     </div>
 
-    <div v-for="p in providers" :key="p.id" class="provider-card">
-      <div class="card-main">
-        <div class="card-info">
-          <div class="card-name">
-            {{ p.name }}
-            <span v-if="p.isDefault" class="badge default">默认</span>
-            <span v-if="!p.enabled" class="badge off">已禁用</span>
-          </div>
-          <div class="card-meta">
-            <span>{{ p.baseUrl || '(未设置 Base URL)' }}</span>
-            <span class="meta-sep">·</span>
-            <span>{{ p.models.length }} 个模型</span>
-            <span class="meta-sep">·</span>
-            <span>{{ p.requestFormat }}</span>
-          </div>
-        </div>
-        <div class="card-actions">
-          <button class="act" @click="emit('edit', p.id)">编辑</button>
-          <button v-if="!p.isDefault && p.enabled" class="act" @click="emit('setDefault', p.id)">设为默认</button>
-          <button class="act danger" @click="emit('delete', p.id)">删除</button>
-        </div>
-      </div>
+    <div v-else class="provider-empty">
+      <p class="provider-empty__title">{{ t('provider.list.noProvidersTitle') }}</p>
+      <p class="provider-empty__copy">{{ t('provider.list.noProvidersCopy') }}</p>
+      <Button variant="primary" @click="emit('create')">{{ t('provider.list.noProvidersAction') }}</Button>
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.provider-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.provider-list {
+  min-height: 0;
+}
 
-.empty { text-align: center; padding: var(--space-6) var(--space-4); }
-.empty-title { font-size: var(--text-base); font-weight: 500; color: var(--text-muted); margin-bottom: var(--space-1); }
-.empty-desc { font-size: var(--text-sm); color: var(--text-soft); }
+.provider-list__scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
 
-.provider-card { border-radius: var(--radius-md); padding: var(--space-4); background: var(--panel); border: 1px solid var(--border); transition: all var(--transition-fast); }
-.provider-card:hover { border-color: var(--border-strong); }
-.card-main { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); }
-.card-info { flex: 1; min-width: 0; }
-.card-name { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-base); font-weight: 550; color: var(--text); margin-bottom: var(--space-1); }
-.badge { font-size: var(--text-xs); padding: 1px 7px; border-radius: 10px; font-weight: 530; }
-.badge.default { background: var(--accent-soft); color: var(--accent); }
-.badge.off { background: var(--panel-solid); color: var(--text-soft); }
-.card-meta { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-xs); color: var(--text-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.meta-sep { color: var(--text-soft); }
+.provider-card {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--settings-border);
+  border-radius: 18px;
+  background: var(--settings-panel-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
 
-.card-actions { display: flex; gap: var(--space-1); flex-shrink: 0; }
-.act { padding: var(--space-1) var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; font-size: var(--text-xs); font-family: var(--font-sans); color: var(--text-muted); cursor: pointer; transition: all var(--transition-fast); }
-.act:hover { background: var(--panel-hover); color: var(--text); border-color: var(--border-strong); }
-.act.danger { color: var(--danger); border-color: transparent; }
-.act.danger:hover { background: var(--danger-soft); border-color: rgba(255, 139, 154, 0.2); }
+.provider-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(155, 140, 255, 0.3);
+}
 
-@media (max-width: 640px) {
-  .card-main { flex-direction: column; align-items: flex-start; }
-  .card-actions { width: 100%; justify-content: flex-end; }
+.provider-card.is-selected {
+  border-color: rgba(155, 140, 255, 0.34);
+  background: color-mix(in srgb, var(--settings-panel-soft) 78%, var(--settings-accent) 22%);
+}
+
+.provider-card.is-default {
+  box-shadow: inset 0 0 0 1px rgba(155, 140, 255, 0.12);
+}
+
+.provider-card__header,
+.provider-card__title-row,
+.provider-card__footer,
+.provider-card__actions {
+  display: flex;
+}
+
+.provider-card__header,
+.provider-card__footer {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.provider-card__title-wrap {
+  min-width: 0;
+}
+
+.provider-card__title-row {
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.provider-card__title-row strong {
+  font-size: 0.96rem;
+  color: var(--settings-text);
+}
+
+.provider-card__type {
+  margin: 0.22rem 0 0;
+  color: var(--settings-muted);
+  font-size: 0.8rem;
+}
+
+.provider-card__details {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.provider-card__details div {
+  min-width: 0;
+}
+
+.provider-card__details dt {
+  color: var(--settings-muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.provider-card__details dd {
+  margin: 0.18rem 0 0;
+  color: var(--settings-text);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-count {
+  color: var(--settings-muted);
+  font-size: 0.82rem;
+}
+
+.provider-card__actions {
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.provider-action {
+  min-height: 2rem;
+  padding: 0.36rem 0.62rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--settings-muted);
+  font-size: 0.78rem;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.provider-action:hover:not(:disabled) {
+  background: rgba(155, 140, 255, 0.12);
+  color: var(--settings-text);
+}
+
+.provider-action:disabled {
+  opacity: 0.45;
+}
+
+.provider-action--danger:hover:not(:disabled) {
+  background: rgba(255, 139, 154, 0.14);
+  color: var(--settings-danger);
+}
+
+.provider-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.65rem;
+  padding: 0.22rem 0.6rem;
+  border: 1px solid var(--settings-border);
+  border-radius: 999px;
+  font-size: 0.74rem;
+}
+
+.provider-badge--accent {
+  border-color: rgba(155, 140, 255, 0.3);
+  background: rgba(155, 140, 255, 0.16);
+  color: var(--settings-accent);
+}
+
+.provider-badge--success {
+  background: rgba(127, 221, 193, 0.12);
+  color: var(--success);
+}
+
+.provider-badge--muted {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--settings-muted);
+}
+
+.provider-empty {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1.2rem;
+  border: 1px dashed var(--settings-border);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.provider-empty__title,
+.provider-empty__copy {
+  margin: 0;
+}
+
+.provider-empty__title {
+  color: var(--settings-text);
+  font-weight: 600;
+}
+
+.provider-empty__copy {
+  color: var(--settings-muted);
+  line-height: 1.6;
 }
 </style>

@@ -1,119 +1,95 @@
-import type { ChatRequest, ChatError, StreamCallback, ErrorCallback } from '@/types/chat'
+import { translate } from '@/i18n/messages'
+import type { ChatRequest, SendChatOptions } from '@/types/chat'
+import { buildUrl, createChatError, readSseStream } from './openaiCompatible'
 
-export async function sendAnthropic(
-  req: ChatRequest,
-  signal: AbortSignal,
-  onChunk: StreamCallback,
-  onError: ErrorCallback,
+export async function sendAnthropicChat(
+  request: ChatRequest,
+  options: SendChatOptions,
 ): Promise<string> {
-  const { provider, model, messages, stream, advanced } = req
-
-  // Convert messages to Anthropic format
-  const systemMsg = messages.find((m) => m.role === 'system')
-  const chatMessages = messages
-    .filter((m) => m.role !== 'system')
-    .map((m) => ({ role: m.role, content: m.content }))
+  const systemMessage = request.messages.find((message) => message.role === 'system')
+  const messages = request.messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }))
 
   const body: Record<string, unknown> = {
-    model,
-    messages: chatMessages,
-    stream,
+    model: request.model,
+    messages,
+    stream: request.stream,
   }
 
-  if (systemMsg) body.system = systemMsg.content
-  if (advanced?.maxTokens !== undefined) body.max_tokens = advanced.maxTokens
-  if (advanced?.temperature !== undefined) body.temperature = advanced.temperature
-  if (advanced?.topP !== undefined) body.top_p = advanced.topP
-
-  const url = `${provider.baseUrl.replace(/\/+$/, '')}/messages`
-
-  let response: Response
-  try {
-    response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': provider.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-      signal,
-    })
-  } catch (e: unknown) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw e
-    const err: ChatError = { type: 'network', message: '网络请求失败，请检查网络连接和 API 地址。' }
-    onError(err)
-    throw new Error(err.message)
+  if (systemMessage) {
+    body.system = systemMessage.content
   }
+
+  if (request.advancedParams?.temperature !== undefined) {
+    body.temperature = request.advancedParams.temperature
+  }
+
+  if (request.advancedParams?.top_p !== undefined) {
+    body.top_p = request.advancedParams.top_p
+  }
+
+  if (request.advancedParams?.max_tokens !== undefined) {
+    body.max_tokens = request.advancedParams.max_tokens
+  }
+
+  const response = await fetch(buildUrl(request.provider.baseUrl, 'messages'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': request.provider.apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+    signal: options.signal,
+  }).catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw error
+    }
+
+    throw createChatError('network', translate(options.locale, 'errors.networkRequestFailed'))
+  })
 
   if (!response.ok) {
-    const errBody = await response.text().catch(() => '')
+    const bodyText = await response.text().catch(() => '')
+
     if (response.status === 401 || response.status === 403) {
-      const err: ChatError = { type: 'auth', message: 'API Key 无效或无权访问。', statusCode: response.status }
-      onError(err)
-      throw new Error(err.message)
+      throw createChatError('auth', translate(options.locale, 'errors.authFailed'), response.status)
     }
-    const err: ChatError = { type: 'unknown', message: `请求失败 (${response.status}): ${errBody.slice(0, 200)}`, statusCode: response.status }
-    onError(err)
-    throw new Error(err.message)
+
+    throw createChatError(
+      response.status >= 500 ? 'server' : 'unknown',
+      bodyText
+        ? translate(options.locale, 'errors.requestFailed', { details: bodyText.slice(0, 240) })
+        : translate(options.locale, 'errors.requestFailedStatus', { status: response.status }),
+      response.status,
+    )
   }
 
-  if (stream && response.body) {
-    return handleAnthropicStream(response.body, onChunk, onError)
-  }
-
-  const data = await response.json()
-  const content = data.content?.[0]?.text ?? ''
-  onChunk(content)
-  return content
-}
-
-async function handleAnthropicStream(
-  body: ReadableStream<Uint8Array>,
-  onChunk: StreamCallback,
-  onError: ErrorCallback,
-): Promise<string> {
-  const reader = body.getReader()
-  const decoder = new TextDecoder()
-  let fullContent = ''
-  let buffer = ''
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data: ')) continue
-        const dataStr = trimmed.slice(6)
-
-        try {
-          const parsed = JSON.parse(dataStr)
-          if (parsed.type === 'content_block_delta') {
-            const delta = parsed.delta?.text
-            if (delta) {
-              fullContent += delta
-              onChunk(delta)
-            }
-          }
-        } catch {
-          // Skip malformed lines
-        }
+  if (request.stream && response.body) {
+    return readSseStream(response.body, (payload) => {
+      if (payload.type !== 'content_block_delta') {
+        return null
       }
-    }
-  } catch (e: unknown) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw e
-    const err: ChatError = { type: 'parse', message: '流式响应中断，请重试。' }
-    onError(err)
-    throw new Error(err.message)
-  } finally {
-    reader.releaseLock()
+
+      const delta = payload.delta as { text?: string } | undefined
+
+      if (typeof delta?.text === 'string' && delta.text.length > 0) {
+        options.onChunk(delta.text)
+        return delta.text
+      }
+
+      return null
+    }, options.locale)
   }
 
-  return fullContent
+  const data = (await response.json()) as {
+    content?: Array<{ text?: string }>
+  }
+  const content = data.content?.[0]?.text ?? ''
+  options.onChunk(content)
+  return content
 }
